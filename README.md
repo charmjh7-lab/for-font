@@ -25,3 +25,9 @@ Java 17 / Android SDK 35 / Gradle 8.9. `./gradlew assembleRelease`로 빌드합�
 핵심 검증: 폰/태블릿 레이아웃, 손가락 무시·펜 취소·실행 취소/복원, 실제 획의 TTF 로드, 원본 왕복. 글꼴 테이블은 Microsoft OpenType 규격에 맞춰 작성하며 FontTools와 FreeType으로 전체 한글 매핑·체크섬을 확인합니다. 실제 S펜의 지연·기기별 팜리젝션 감각은 실기기 확인이 필요합니다.
 
 참고: [OpenType glyf](https://learn.microsoft.com/en-us/typography/opentype/spec/glyf), [Android stylus](https://developer.android.com/develop/ui/views/touch-and-input/stylus-input/advanced-stylus-features).
+
+## 1.0.1
+
+- **문장 보기**: 입력한 문장을 현재 글꼴로 즉시 확인합니다. 마지막 문장을 기억하고 아직 작성하지 않은 글자를 알려 줍니다.
+- **이동**: 켠 다음 S펜으로 끌면 현재 글자의 모든 획이 함께 이동합니다. 칸 밖으로 벗어나지 않으며 한 번의 취소로 되돌립니다.
+- **기본 글자**: 현재 글자의 기기 기본 글꼴을 기준선에 맞춰 표시합니다. 표시 여부와 투명도를 조절하고 저장합니다.

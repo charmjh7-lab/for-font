@@ -71,6 +71,33 @@ public class StudioTest {
   }
 
   @Test
+  public void movingWholeGlyphIsUndoableAndCancelledMoveRestoresInk() {
+    InkBoard b = new InkBoard(RuntimeEnvironment.getApplication());
+    b.layout(0, 0, 1200, 500);
+    FontProject.Stroke stroke = new FontProject.Stroke(20);
+    stroke.points.add(new FontProject.Point(300, 400, 1));
+    stroke.points.add(new FontProject.Point(600, 700, .6f));
+    b.glyph.strokes.add(stroke);
+    b.moveMode = true;
+    float x = b.writing.centerX(), y = b.writing.centerY(), distance = b.writing.width() / 10;
+    send(b, 0, MotionEvent.TOOL_TYPE_STYLUS, x, y, 0);
+    send(b, 2, MotionEvent.TOOL_TYPE_STYLUS, x + distance, y, 0);
+    send(b, 1, MotionEvent.TOOL_TYPE_STYLUS, x + distance, y, 0);
+    assertEquals(400, b.glyph.strokes.get(0).points.get(0).x, .01f);
+    assertEquals(700, b.glyph.strokes.get(0).points.get(1).x, .01f);
+    assertEquals(1, b.undo.size());
+    b.undo();
+    assertEquals(300, b.glyph.strokes.get(0).points.get(0).x, .01f);
+    b.redo();
+    assertEquals(400, b.glyph.strokes.get(0).points.get(0).x, .01f);
+    send(b, 0, MotionEvent.TOOL_TYPE_STYLUS, x, y, 0);
+    send(b, 2, MotionEvent.TOOL_TYPE_STYLUS, x, y + distance, 0);
+    send(b, 3, MotionEvent.TOOL_TYPE_STYLUS, x, y, 0);
+    assertEquals(400, b.glyph.strokes.get(0).points.get(0).y, .01f);
+    assertEquals(1, b.undo.size());
+  }
+
+  @Test
   public void realInkExportsAndSourceRoundTrips() throws Exception {
     FontProject p = new FontProject(RuntimeEnvironment.getApplication());
     FontProject.Glyph g = new FontProject.Glyph('가');

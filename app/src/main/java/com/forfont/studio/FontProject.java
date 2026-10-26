@@ -54,7 +54,9 @@ final class FontProject {
   String name = "My Hand";
   int group = 0, index = 0, reference = -1;
   float penWidth = 18;
-  boolean ghost = false;
+  boolean ghost = false, guideEnabled = true;
+  float guideOpacity = .18f;
+  String previewText = "가나다라 ABC abc 0123";
   private final File root, glyphDir;
 
   FontProject(Context c) throws Exception {
@@ -72,6 +74,11 @@ final class FontProject {
       if (!Float.isFinite(penWidth)) penWidth = 18;
       penWidth = Math.max(6, Math.min(54, penWidth));
       ghost = j.optBoolean("ghost", false);
+      guideEnabled = j.optBoolean("guideEnabled", true);
+      guideOpacity = (float) j.optDouble("guideOpacity", .18);
+      if (!Float.isFinite(guideOpacity)) guideOpacity = .18f;
+      guideOpacity = Math.max(0, Math.min(1, guideOpacity));
+      previewText = j.optString("previewText", "가나다라 ABC abc 0123");
     }
     File[] files = glyphDir.listFiles((d, n) -> n.endsWith(".json") || n.endsWith(".json.bak"));
     HashSet<String> names = new HashSet<>();
@@ -104,7 +111,10 @@ final class FontProject {
         .put("index", index)
         .put("reference", reference)
         .put("penWidth", penWidth)
-        .put("ghost", ghost);
+        .put("ghost", ghost)
+        .put("guideEnabled", guideEnabled)
+        .put("guideOpacity", guideOpacity)
+        .put("previewText", previewText);
   }
 
   void saveSettings(JSONObject j) throws Exception {

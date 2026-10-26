@@ -21,7 +21,7 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
   FontProject project;
   InkBoard board;
   TextView title, target, detail, progress, status, penLabel;
-  Button undo, redo, erase, ghost;
+  Button undo, redo, erase, ghost, move;
   Spinner groups;
   LinearLayout root;
   boolean loading = true, busy = false, ignoreGroup = false, restoring = false;
@@ -190,7 +190,7 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
     title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
     header.addView(title, new LinearLayout.LayoutParams(0, dp(49), 1));
     header.addView(
-        button("미리보기", false, this::preview), new LinearLayout.LayoutParams(dp(88), dp(40)));
+        button("문장 보기", false, this::preview), new LinearLayout.LayoutParams(dp(88), dp(40)));
     Button menu = button("내보내기", true, this::exportMenu);
     LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(dp(93), dp(40));
     mp.leftMargin = dp(8);
@@ -230,11 +230,15 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
     detail = label("", 12, muted);
     caption.addView(detail);
     prompt.addView(caption, new LinearLayout.LayoutParams(0, -2, 1));
+    prompt.addView(
+        button("기본 글자", false, this::guideOptions), new LinearLayout.LayoutParams(dp(82), dp(39)));
     root.addView(prompt);
     board = new InkBoard(this);
     board.listener = this;
     board.width = project.penWidth;
     board.ghost = project.ghost;
+    board.guideEnabled = project.guideEnabled;
+    board.guideOpacity = project.guideOpacity;
     root.addView(board, new LinearLayout.LayoutParams(-1, 0, 1));
     LinearLayout tools = row();
     undo = button("↶ 취소", false, () -> board.undo());
@@ -245,11 +249,27 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
             false,
             () -> {
               board.eraser = !board.eraser;
+              board.moveMode = false;
               updateTools();
             });
     addButton(tools, undo, 1);
     addButton(tools, redo, 1);
     addButton(tools, erase, 1);
+    move =
+        button(
+            "이동",
+            false,
+            () -> {
+              if (board.glyph.strokes.isEmpty()) {
+                toast("먼저 글자를 써 주세요.");
+                return;
+              }
+              board.moveMode = !board.moveMode;
+              board.eraser = false;
+              updateTools();
+              status.setText(board.moveMode ? "S펜으로 끌어서 글자 전체 이동" : "S펜으로 필기");
+            });
+    addButton(tools, move, 1);
     addButton(tools, button("비우기", false, this::clearGlyph), 1);
     root.addView(tools, new LinearLayout.LayoutParams(-1, dp(49)));
     LinearLayout options = row();
@@ -369,6 +389,8 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
   void updateTools() {
     undo.setEnabled(!board.undo.isEmpty());
     redo.setEnabled(!board.redo.isEmpty());
+    move.setTextColor(board.moveMode ? Color.WHITE : accent);
+    move.setBackground(shape(board.moveMode ? accent : Color.WHITE, 0));
     erase.setText(board.eraser ? "펜으로" : "지우개");
     erase.setTextColor(board.eraser ? Color.WHITE : accent);
     erase.setBackground(shape(board.eraser ? accent : Color.WHITE, 0));
@@ -421,7 +443,7 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
 
   @Override
   public void penActivity() {
-    status.setText(board.eraseGesture ? "획 지우기" : "필기 중…");
+    status.setText(board.moveGesture ? "글자 전체 이동 중…" : board.eraseGesture ? "획 지우기" : "필기 중…");
   }
 
   void saveError(Exception e) {
@@ -765,11 +787,12 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
     worker.execute(
         () -> {
           try {
-            File f = new File(getCacheDir(), "preview.ttf");
+            File f = File.createTempFile("preview-", ".ttf", getCacheDir());
             try (FileOutputStream out = new FileOutputStream(f)) {
               out.write(makeFont(name, glyphs));
             }
             Typeface face = Typeface.createFromFile(f);
+            f.delete();
             main.post(
                 () -> {
                   setBusy(false, "자동 저장됨");
@@ -785,42 +808,113 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
         });
   }
 
+  void guideOptions() {
+    LinearLayout panel = new LinearLayout(this);
+    panel.setOrientation(LinearLayout.VERTICAL);
+    panel.setPadding(dp(22), dp(8), dp(22), dp(8));
+    Switch enabled = new Switch(this);
+    enabled.setText("현재 글자의 기본 모양 표시");
+    enabled.setChecked(project.guideEnabled);
+    panel.addView(enabled, new LinearLayout.LayoutParams(-1, dp(48)));
+    TextView opacity =
+        label("투명도 " + Math.round((1 - project.guideOpacity) * 100) + "%", 14, muted);
+    panel.addView(opacity);
+    SeekBar slider = new SeekBar(this);
+    slider.setMax(100);
+    slider.setProgress(Math.round((1 - project.guideOpacity) * 100));
+    slider.setEnabled(project.guideEnabled);
+    panel.addView(slider, new LinearLayout.LayoutParams(-1, dp(45)));
+    panel.addView(label("기기 기본 글꼴을 기준선에 맞춰 보여 줍니다.", 12, muted));
+    enabled.setOnCheckedChangeListener(
+        (v, on) -> {
+          project.guideEnabled = board.guideEnabled = on;
+          slider.setEnabled(on);
+          board.invalidate();
+        });
+    slider.setOnSeekBarChangeListener(
+        new SeekBar.OnSeekBarChangeListener() {
+          public void onProgressChanged(SeekBar s, int p, boolean user) {
+            project.guideOpacity = board.guideOpacity = 1 - p / 100f;
+            opacity.setText("투명도 " + p + "%");
+            board.invalidate();
+          }
+
+          public void onStartTrackingTouch(SeekBar s) {}
+
+          public void onStopTrackingTouch(SeekBar s) {}
+        });
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("기본 글자 안내")
+            .setView(panel)
+            .setPositiveButton("완료", null)
+            .create();
+    dialog.setOnDismissListener(d -> saveSettings());
+    dialog.show();
+  }
+
   void showPreview(Typeface face) {
     LinearLayout view = new LinearLayout(this);
     view.setOrientation(LinearLayout.VERTICAL);
     view.setPadding(dp(22), dp(10), dp(22), dp(10));
-    TextView note = label("작성하지 않은 글자는 기기 기본 글꼴로 보입니다.", 12, muted);
-    view.addView(note);
+    view.addView(label("확인할 문장을 입력해 주세요", 14, textColor));
     EditText sample = new EditText(this);
-    sample.setText("가나다라 ABC abc 0123");
-    sample.setTextSize(16);
-    view.addView(sample);
-    TextView rendered = label(sample.getText().toString(), 36, textColor);
+    sample.setHint("예: 가나다 ABC");
+    sample.setText(project.previewText);
+    sample.setTextSize(18);
+    sample.setMinLines(2);
+    sample.setMaxLines(4);
+    sample.setFilters(
+        new android.text.InputFilter[] {new android.text.InputFilter.LengthFilter(2000)});
+    view.addView(sample, new LinearLayout.LayoutParams(-1, -2));
+    view.addView(label("내 글씨", 13, accent));
+    TextView rendered = label(sample.getText().toString(), 38, textColor);
     rendered.setTypeface(face);
-    rendered.setPadding(0, dp(12), 0, dp(12));
-    view.addView(rendered);
-    StringBuilder all = new StringBuilder();
-    for (int cp : project.glyphs.keySet()) all.appendCodePoint(cp);
-    TextView written = label(all.toString(), 32, textColor);
-    written.setTypeface(face);
-    view.addView(written);
+    rendered.setPadding(dp(10), dp(16), dp(10), dp(16));
+    rendered.setBackground(shape(Color.WHITE, 0));
+    rendered.setMinHeight(dp(110));
+    view.addView(rendered, new LinearLayout.LayoutParams(-1, -2));
+    TextView note = label("", 12, muted);
+    note.setPadding(0, dp(10), 0, 0);
+    view.addView(note);
+    Runnable updateNote =
+        () -> {
+          LinkedHashSet<String> missing = new LinkedHashSet<>();
+          String value = sample.getText().toString();
+          value
+              .codePoints()
+              .filter(cp -> !Character.isWhitespace(cp) && !project.glyphs.containsKey(cp))
+              .forEach(cp -> missing.add(new String(Character.toChars(cp))));
+          note.setText(
+              missing.isEmpty()
+                  ? "모두 직접 쓴 글자입니다."
+                  : "아직 안 쓴 글자는 기본 글꼴로 표시해요: " + String.join(" ", missing));
+        };
+    updateNote.run();
     sample.addTextChangedListener(
         new android.text.TextWatcher() {
           public void beforeTextChanged(CharSequence s, int a, int c, int f) {}
 
           public void onTextChanged(CharSequence s, int st, int before, int count) {
             rendered.setText(s);
+            project.previewText = s.toString();
+            updateNote.run();
           }
 
           public void afterTextChanged(android.text.Editable e) {}
         });
     ScrollView scroll = new ScrollView(this);
+    scroll.setFillViewport(true);
     scroll.addView(view);
-    new AlertDialog.Builder(this)
-        .setTitle(project.name + " · 실제 TTF 미리보기")
-        .setView(scroll)
-        .setPositiveButton("닫기", null)
-        .show();
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("문장 미리보기 · " + project.name)
+            .setView(scroll)
+            .setPositiveButton("닫기", null)
+            .create();
+    dialog.setOnDismissListener(d -> saveSettings());
+    dialog.show();
+    dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
   }
 
   @Override

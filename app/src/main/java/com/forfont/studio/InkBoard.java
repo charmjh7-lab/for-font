@@ -19,7 +19,9 @@ final class InkBoard extends View {
   FontProject.Glyph glyph = new FontProject.Glyph(65), reference;
   FontProject.Stroke live;
   float width = 18;
-  boolean eraser = false, ghost = false, inputEnabled = true;
+  boolean eraser = false, ghost = false, inputEnabled = true, moveMode = false, guideEnabled = true;
+  float guideOpacity = .18f, moveStartX, moveStartY, movedX, movedY;
+  boolean moveGesture;
   final ArrayDeque<FontProject.Glyph> undo = new ArrayDeque<>(), redo = new ArrayDeque<>();
   final RectF writing = new RectF(), comparison = new RectF();
   Listener listener;
@@ -42,6 +44,7 @@ final class InkBoard extends View {
   void setGlyph(FontProject.Glyph g) {
     cancel();
     glyph = g;
+    moveMode = false;
     undo.clear();
     redo.clear();
     invalidate();
@@ -51,6 +54,7 @@ final class InkBoard extends View {
     if (before != null) glyph = before;
     before = null;
     live = null;
+    moveGesture = false;
     penId = -1;
     invalidate();
   }
@@ -195,6 +199,7 @@ final class InkBoard extends View {
           wide ? 17 : 12,
           Color.rgb(158, 155, 169));
     else drawGlyph(c, comparison, reference, ink);
+    if (guideEnabled && guideOpacity > 0) drawStandardGlyph(c);
     if (ghost && reference != null) drawGlyph(c, writing, reference, Color.argb(42, 87, 80, 181));
     drawGlyph(c, writing, glyph, ink);
     if (live != null) {
@@ -244,11 +249,16 @@ final class InkBoard extends View {
         penSeen = android.os.SystemClock.uptimeMillis();
         if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
         before = glyph.copy();
+        moveGesture = moveMode;
+        moveStartX = (e.getX(ai) - writing.left) * 1000 / writing.width();
+        moveStartY = (e.getY(ai) - writing.top) * 1000 / writing.height();
+        movedX = movedY = 0;
         eraseGesture =
-            eraser
-                || e.getToolType(ai) == MotionEvent.TOOL_TYPE_ERASER
-                || (e.getButtonState() & MotionEvent.BUTTON_STYLUS_PRIMARY) != 0;
-        if (!eraseGesture) live = new FontProject.Stroke(width);
+            !moveGesture
+                && (eraser
+                    || e.getToolType(ai) == MotionEvent.TOOL_TYPE_ERASER
+                    || (e.getButtonState() & MotionEvent.BUTTON_STYLUS_PRIMARY) != 0);
+        if (!eraseGesture && !moveGesture) live = new FontProject.Stroke(width);
         add(e, ai, -1);
         if (listener != null) listener.penActivity();
       }
@@ -269,12 +279,16 @@ final class InkBoard extends View {
         }
         add(e, ai, -1);
         if (live != null && !live.points.isEmpty()) glyph.strokes.add(live);
-        undo.push(before);
-        while (undo.size() > 40) undo.removeLast();
-        redo.clear();
+        boolean changed = !moveGesture || movedX != 0 || movedY != 0;
+        if (changed) {
+          undo.push(before);
+          while (undo.size() > 40) undo.removeLast();
+          redo.clear();
+        }
         before = null;
         live = null;
         penId = -1;
+        moveGesture = false;
         penSeen = android.os.SystemClock.uptimeMillis();
         notifyChanged();
       } else if (action == MotionEvent.ACTION_UP
@@ -289,6 +303,12 @@ final class InkBoard extends View {
   void add(MotionEvent e, int i, int history) {
     float ex = history < 0 ? e.getX(i) : e.getHistoricalX(i, history),
         ey = history < 0 ? e.getY(i) : e.getHistoricalY(i, history);
+    if (moveGesture) {
+      translateFromStart(
+          (ex - writing.left) * 1000 / writing.width() - moveStartX,
+          (ey - writing.top) * 1000 / writing.height() - moveStartY);
+      return;
+    }
     float x = Math.max(35, Math.min(965, (ex - writing.left) * 1000 / writing.width())),
         y = Math.max(35, Math.min(965, (ey - writing.top) * 1000 / writing.height()));
     float p = history < 0 ? e.getPressure(i) : e.getHistoricalPressure(i, history);
@@ -302,6 +322,58 @@ final class InkBoard extends View {
       if (Math.hypot(x - prev.x, y - prev.y) < 1) return;
     }
     live.points.add(new FontProject.Point(x, y, p));
+    invalidate();
+  }
+
+  void drawStandardGlyph(Canvas c) {
+    c.save();
+    c.clipRect(writing);
+    c.translate(writing.left, writing.top);
+    c.scale(writing.width() / 1000, writing.height() / 1000);
+    Paint guide = new Paint(Paint.ANTI_ALIAS_FLAG);
+    guide.setColor(Color.argb(Math.round(255 * guideOpacity), 95, 101, 119));
+    guide.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+    guide.setTextSize(1000);
+    boolean korean = glyph.code >= 0x1100;
+    Rect metrics = new Rect();
+    String anchor = korean ? "가" : "H";
+    guide.getTextBounds(anchor, 0, anchor.length(), metrics);
+    float scale = 700f / Math.max(1, metrics.height());
+    guide.setTextSize(1000 * scale);
+    String value = new String(Character.toChars(glyph.code));
+    float advance = guide.measureText(value);
+    if (advance > 850) {
+      float shrink = 850 / advance;
+      guide.setTextSize(guide.getTextSize() * shrink);
+      scale *= shrink;
+    }
+    float x = korean ? (1000 - guide.measureText(value)) / 2 : 100;
+    float baseline = korean ? 800 - metrics.bottom * scale : 800;
+    c.drawText(value, x, baseline, guide);
+    c.restore();
+  }
+
+  void translateFromStart(float dx, float dy) {
+    if (before == null || before.strokes.isEmpty()) return;
+    float left = 1000, top = 1000, right = 0, bottom = 0;
+    for (FontProject.Stroke stroke : before.strokes)
+      for (FontProject.Point p : stroke.points) {
+        float radius = stroke.width / 2;
+        left = Math.min(left, p.x - radius);
+        top = Math.min(top, p.y - radius);
+        right = Math.max(right, p.x + radius);
+        bottom = Math.max(bottom, p.y + radius);
+      }
+    dx = Math.max(Math.min(0, -left), Math.min(Math.max(0, 1000 - right), dx));
+    dy = Math.max(Math.min(0, -top), Math.min(Math.max(0, 1000 - bottom), dy));
+    movedX = dx;
+    movedY = dy;
+    glyph = before.copy();
+    for (FontProject.Stroke stroke : glyph.strokes)
+      for (int i = 0; i < stroke.points.size(); i++) {
+        FontProject.Point p = stroke.points.get(i);
+        stroke.points.set(i, new FontProject.Point(p.x + dx, p.y + dy, p.pressure));
+      }
     invalidate();
   }
 
