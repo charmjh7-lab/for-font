@@ -21,7 +21,9 @@ final class InkBoard extends View {
   float width = 18;
   boolean eraser = false, ghost = false, inputEnabled = true, moveMode = false, guideEnabled = true;
   float guideOpacity = .18f, moveStartX, moveStartY, movedX, movedY;
-  boolean moveGesture;
+  boolean moveGesture, stylusButtonPressed;
+  static final int STYLUS_BUTTONS =
+      MotionEvent.BUTTON_STYLUS_PRIMARY | MotionEvent.BUTTON_STYLUS_SECONDARY;
   final ArrayDeque<FontProject.Glyph> undo = new ArrayDeque<>(), redo = new ArrayDeque<>();
   final RectF writing = new RectF(), comparison = new RectF();
   Listener listener;
@@ -101,18 +103,20 @@ final class InkBoard extends View {
 
   @Override
   protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-    float gap = dp(16), margin = dp(14), top = dp(52), bottom = dp(34);
+    float margin = dp(14), side = dp(58), top = dp(68), bottom = dp(34);
     if (w >= dp(600)) {
-      float size = Math.max(40, Math.min((w - 3 * margin) / 2, h - top - bottom));
+      float size = Math.max(40, Math.min(w / 2f - side - 2 * margin, h - top - bottom));
       float y = top + (h - top - bottom - size) / 2;
-      comparison.set((w / 2f - size) / 2, y, (w / 2f + size) / 2, y + size);
-      writing.set(w / 2f + (w / 2f - size) / 2, y, w / 2f + (w / 2f + size) / 2, y + size);
+      float left = side + (w / 2f - side - size) / 2;
+      comparison.set(left, y, left + size, y + size);
+      float right = w / 2f + (w / 2f - side - size) / 2;
+      writing.set(right, y, right + size, y + size);
     } else {
-      float ref = Math.min(dp(120), h * .24f),
-          size = Math.max(40, Math.min(w - 2 * margin, h - ref - top - bottom - gap));
-      comparison.set(margin, dp(38), margin + ref, dp(38) + ref);
-      float y = ref + top + gap;
-      writing.set((w - size) / 2, y, (w + size) / 2, y + size);
+      float ref = Math.min(dp(115), h * .22f);
+      comparison.set(side + margin, dp(45), side + margin + ref, dp(45) + ref);
+      float y = ref + dp(105);
+      float size = Math.max(40, Math.min(w - side - 2 * margin, h - y - bottom));
+      writing.set((w - side - size) / 2, y, (w - side + size) / 2, y + size);
     }
   }
 
@@ -122,6 +126,7 @@ final class InkBoard extends View {
     paint.setColor(color);
     paint.setTextSize(dp(size));
     paint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+    paint.setTextAlign(Paint.Align.LEFT);
     c.drawText(s, x, y, paint);
   }
 
@@ -180,14 +185,22 @@ final class InkBoard extends View {
     super.onDraw(c);
     c.drawColor(Color.rgb(246, 245, 241));
     boolean wide = getWidth() >= dp(600);
-    text(
+    String compareTitle =
+        "비교" + (reference == null ? "" : " · " + new String(Character.toChars(reference.code)));
+    centeredText(
         c,
-        "비교 글자" + (reference == null ? "" : " · " + new String(Character.toChars(reference.code))),
-        comparison.left,
-        wide ? dp(27) : dp(24),
-        13,
+        compareTitle,
+        comparison.centerX(),
+        comparison.top - dp(18),
+        18,
         Color.rgb(111, 108, 127));
-    text(c, "지금 쓰는 글자", writing.left, wide ? dp(27) : writing.top - dp(14), 13, accent);
+    centeredText(
+        c,
+        new String(Character.toChars(glyph.code)),
+        writing.centerX(),
+        writing.top - dp(18),
+        34,
+        accent);
     guides(c, comparison);
     guides(c, writing);
     if (reference == null)
@@ -196,7 +209,7 @@ final class InkBoard extends View {
           "작성 후 비교",
           comparison.left + dp(12),
           comparison.centerY(),
-          wide ? 17 : 12,
+          wide ? 17 : 10,
           Color.rgb(158, 155, 169));
     else drawGlyph(c, comparison, reference, ink);
     if (guideEnabled && guideOpacity > 0) drawStandardGlyph(c);
@@ -210,10 +223,10 @@ final class InkBoard extends View {
     if (!wide)
       text(
           c,
-          "비교 영역을 눌러 변경",
-          comparison.right + dp(12),
+          "눌러서 비교 글자 선택",
+          comparison.right + dp(8),
           comparison.centerY(),
-          12,
+          10,
           Color.rgb(130, 127, 145));
     text(
         c,
@@ -224,6 +237,31 @@ final class InkBoard extends View {
         Color.rgb(135, 131, 151));
   }
 
+  void centeredText(Canvas c, String value, float x, float y, float size, int color) {
+    paint.reset();
+    paint.setAntiAlias(true);
+    paint.setColor(color);
+    paint.setTextSize(dp(size));
+    paint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    paint.setTextAlign(Paint.Align.CENTER);
+    c.drawText(value, x, y, paint);
+  }
+
+  @Override
+  public boolean onGenericMotionEvent(MotionEvent e) {
+    if (e.getActionMasked() == MotionEvent.ACTION_BUTTON_PRESS
+        && (e.getActionButton() & STYLUS_BUTTONS) != 0) {
+      stylusButtonPressed = true;
+      return true;
+    }
+    if (e.getActionMasked() == MotionEvent.ACTION_BUTTON_RELEASE
+        && (e.getActionButton() & STYLUS_BUTTONS) != 0) {
+      stylusButtonPressed = false;
+      return true;
+    }
+    return super.onGenericMotionEvent(e);
+  }
+
   boolean pen(MotionEvent e, int i) {
     int t = e.getToolType(i);
     return t == MotionEvent.TOOL_TYPE_STYLUS || t == MotionEvent.TOOL_TYPE_ERASER;
@@ -231,7 +269,10 @@ final class InkBoard extends View {
 
   @Override
   public boolean onHoverEvent(MotionEvent e) {
-    if (pen(e, 0)) penSeen = android.os.SystemClock.uptimeMillis();
+    if (pen(e, 0)) {
+      penSeen = android.os.SystemClock.uptimeMillis();
+      stylusButtonPressed = (e.getButtonState() & STYLUS_BUTTONS) != 0;
+    }
     return super.onHoverEvent(e);
   }
 
@@ -249,15 +290,15 @@ final class InkBoard extends View {
         penSeen = android.os.SystemClock.uptimeMillis();
         if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
         before = glyph.copy();
-        moveGesture = moveMode;
+        boolean penEraser =
+            stylusButtonPressed
+                || (e.getButtonState() & STYLUS_BUTTONS) != 0
+                || e.getToolType(ai) == MotionEvent.TOOL_TYPE_ERASER;
+        moveGesture = moveMode && !penEraser;
         moveStartX = (e.getX(ai) - writing.left) * 1000 / writing.width();
         moveStartY = (e.getY(ai) - writing.top) * 1000 / writing.height();
         movedX = movedY = 0;
-        eraseGesture =
-            !moveGesture
-                && (eraser
-                    || e.getToolType(ai) == MotionEvent.TOOL_TYPE_ERASER
-                    || (e.getButtonState() & MotionEvent.BUTTON_STYLUS_PRIMARY) != 0);
+        eraseGesture = !moveGesture && (eraser || penEraser);
         if (!eraseGesture && !moveGesture) live = new FontProject.Stroke(width);
         add(e, ai, -1);
         if (listener != null) listener.penActivity();
@@ -289,6 +330,7 @@ final class InkBoard extends View {
         live = null;
         penId = -1;
         moveGesture = false;
+        stylusButtonPressed = (e.getButtonState() & STYLUS_BUTTONS) != 0;
         penSeen = android.os.SystemClock.uptimeMillis();
         notifyChanged();
       } else if (action == MotionEvent.ACTION_UP
@@ -375,6 +417,45 @@ final class InkBoard extends View {
         stroke.points.set(i, new FontProject.Point(p.x + dx, p.y + dy, p.pressure));
       }
     invalidate();
+  }
+
+  float previewScale(FontProject.Glyph original, float requested) {
+    RectF bounds = new RectF();
+    boolean first = true;
+    float maxWidth = 1, minWidth = 100;
+    for (FontProject.Stroke stroke : original.strokes) {
+      maxWidth = Math.max(maxWidth, stroke.width);
+      minWidth = Math.min(minWidth, stroke.width);
+      for (FontProject.Point p : stroke.points) {
+        float r = stroke.width / 2;
+        if (first) {
+          bounds.set(p.x - r, p.y - r, p.x + r, p.y + r);
+          first = false;
+        } else {
+          bounds.left = Math.min(bounds.left, p.x - r);
+          bounds.right = Math.max(bounds.right, p.x + r);
+          bounds.top = Math.min(bounds.top, p.y - r);
+          bounds.bottom = Math.max(bounds.bottom, p.y + r);
+        }
+      }
+    }
+    if (first) return 1;
+    float cx = bounds.centerX(), cy = bounds.centerY();
+    float max = 100 / maxWidth;
+    if (bounds.width() > 0) max = Math.min(max, 2 * Math.min(cx, 1000 - cx) / bounds.width());
+    if (bounds.height() > 0) max = Math.min(max, 2 * Math.min(cy, 1000 - cy) / bounds.height());
+    float scale = Math.max(1 / minWidth, Math.min(Math.max(.01f, max), requested));
+    glyph = original.copy();
+    for (FontProject.Stroke stroke : glyph.strokes) {
+      stroke.width *= scale;
+      for (int i = 0; i < stroke.points.size(); i++) {
+        FontProject.Point p = stroke.points.get(i);
+        stroke.points.set(
+            i, new FontProject.Point(cx + (p.x - cx) * scale, cy + (p.y - cy) * scale, p.pressure));
+      }
+    }
+    invalidate();
+    return scale;
   }
 
   static boolean hit(FontProject.Stroke s, float x, float y) {

@@ -98,6 +98,58 @@ public class StudioTest {
   }
 
   @Test
+  public void scaleAndPenButtonKeepSourceAndOriginalTool() throws Exception {
+    InkBoard b = new InkBoard(RuntimeEnvironment.getApplication());
+    b.layout(0, 0, 1200, 600);
+    FontProject.Stroke stroke = new FontProject.Stroke(20);
+    stroke.points.add(new FontProject.Point(300, 400, 1));
+    stroke.points.add(new FontProject.Point(600, 700, 1));
+    b.glyph.strokes.add(stroke);
+    FontProject.Glyph original = b.glyph.copy();
+    assertEquals(1.5f, b.previewScale(original, 1.5f), .001f);
+    assertEquals(225, b.glyph.strokes.get(0).points.get(0).x, .001f);
+    assertEquals(30, b.glyph.strokes.get(0).width, .001f);
+    FontProject.parseGlyph(FontProject.toJson(b.glyph));
+    b.glyph = original;
+    b.moveMode = true;
+    MotionEvent.PointerProperties props = new MotionEvent.PointerProperties();
+    props.id = 0;
+    props.toolType = MotionEvent.TOOL_TYPE_STYLUS;
+    MotionEvent.PointerCoords point = new MotionEvent.PointerCoords();
+    point.x = b.writing.left + b.writing.width() * .3f;
+    point.y = b.writing.top + b.writing.height() * .4f;
+    point.pressure = 1;
+    MotionEvent down =
+        MotionEvent.obtain(
+            1,
+            2,
+            MotionEvent.ACTION_DOWN,
+            1,
+            new MotionEvent.PointerProperties[] {props},
+            new MotionEvent.PointerCoords[] {point},
+            0,
+            MotionEvent.BUTTON_STYLUS_SECONDARY,
+            1,
+            1,
+            0,
+            0,
+            InputDevice.SOURCE_STYLUS,
+            0);
+    b.onTouchEvent(down);
+    down.recycle();
+    assertTrue(b.eraseGesture);
+    assertFalse(b.moveGesture);
+    assertTrue(b.glyph.strokes.isEmpty());
+    send(b, 1, MotionEvent.TOOL_TYPE_STYLUS, point.x, point.y, 0);
+    b.undo();
+    assertEquals(1, b.glyph.strokes.size());
+    send(b, 0, MotionEvent.TOOL_TYPE_STYLUS, point.x, point.y, 0);
+    assertTrue(b.moveGesture);
+    assertFalse(b.eraseGesture);
+    b.cancel();
+  }
+
+  @Test
   public void realInkExportsAndSourceRoundTrips() throws Exception {
     FontProject p = new FontProject(RuntimeEnvironment.getApplication());
     FontProject.Glyph g = new FontProject.Glyph('가');

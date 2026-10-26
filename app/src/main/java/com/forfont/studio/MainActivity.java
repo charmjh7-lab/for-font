@@ -2,7 +2,6 @@ package com.forfont.studio;
 
 import android.app.*;
 import android.content.*;
-import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -20,8 +19,8 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
   final Handler main = new Handler(Looper.getMainLooper());
   FontProject project;
   InkBoard board;
-  TextView title, target, detail, progress, status, penLabel;
-  Button undo, redo, erase, ghost, move;
+  TextView title, detail, progress, status;
+  Button undo, redo, erase, ghost, move, resize;
   Spinner groups;
   LinearLayout root;
   boolean loading = true, busy = false, ignoreGroup = false, restoring = false;
@@ -218,31 +217,62 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
         button("글자 찾기", false, () -> pickGlyph(false)),
         new LinearLayout.LayoutParams(dp(95), dp(40)));
     root.addView(groupRow);
-    LinearLayout prompt = row();
-    target = label("", 46, accent);
-    target.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-    target.setGravity(Gravity.CENTER);
-    prompt.addView(target, new LinearLayout.LayoutParams(dp(100), dp(77)));
-    LinearLayout caption = new LinearLayout(this);
-    caption.setOrientation(LinearLayout.VERTICAL);
-    TextView instruction = label("위 글자를 아래에 써 주세요", 16, textColor);
-    caption.addView(instruction);
-    detail = label("", 12, muted);
-    caption.addView(detail);
-    prompt.addView(caption, new LinearLayout.LayoutParams(0, -2, 1));
-    prompt.addView(
-        button("기본 글자", false, this::guideOptions), new LinearLayout.LayoutParams(dp(82), dp(39)));
-    root.addView(prompt);
+    LinearLayout settingsRow = row();
+    detail = label("S펜 전용 · 버튼을 누른 채 지우기", 12, muted);
+    settingsRow.addView(detail, new LinearLayout.LayoutParams(0, dp(43), 1));
+    settingsRow.addView(
+        button("펜 굵기", false, this::penOptions), new LinearLayout.LayoutParams(dp(78), dp(38)));
+    settingsRow.addView(
+        button("기본 글자", false, this::guideOptions), new LinearLayout.LayoutParams(dp(82), dp(38)));
+    root.addView(settingsRow);
     board = new InkBoard(this);
     board.listener = this;
     board.width = project.penWidth;
     board.ghost = project.ghost;
     board.guideEnabled = project.guideEnabled;
     board.guideOpacity = project.guideOpacity;
-    root.addView(board, new LinearLayout.LayoutParams(-1, 0, 1));
+    FrameLayout editor = new FrameLayout(this);
+    editor.addView(board, new FrameLayout.LayoutParams(-1, -1));
+    Button previous = button("‹", false, () -> move(-1));
+    previous.setTextSize(28);
+    previous.setContentDescription("이전 글자");
+    Button next = button("›", true, () -> move(1));
+    next.setTextSize(28);
+    next.setContentDescription("다음 글자");
+    View.OnTouchListener rejectPalm =
+        (v, e) ->
+            e.getToolType(e.getActionIndex()) == MotionEvent.TOOL_TYPE_FINGER && board.penNearby();
+    previous.setOnTouchListener(rejectPalm);
+    next.setOnTouchListener(rejectPalm);
+    editor.addView(previous, new FrameLayout.LayoutParams(dp(44), dp(52)));
+    editor.addView(next, new FrameLayout.LayoutParams(dp(44), dp(52)));
+    board.addOnLayoutChangeListener(
+        (v, l, t, r, b, ol, ot, or, ob) -> {
+          placeNavigation(
+              previous, board.comparison.left - dp(50), board.comparison.centerY() - dp(26));
+          placeNavigation(next, board.writing.right + dp(6), board.writing.centerY() - dp(26));
+        });
+    root.addView(editor, new LinearLayout.LayoutParams(-1, 0, 1));
+    LinearLayout options = row();
+    ghost =
+        button(
+            "겹쳐 보기",
+            false,
+            () -> {
+              project.ghost = board.ghost = !board.ghost;
+              board.invalidate();
+              updateTools();
+              saveSettings();
+            });
+    resize = button("크기", false, this::resizeGlyph);
+    addButton(options, ghost, 1);
+    addButton(options, button("비교", false, () -> pickGlyph(true)), 1);
+    addButton(options, button("안 쓴 글자", false, this::nextEmpty), 1);
+    addButton(options, resize, 1);
+    root.addView(options, new LinearLayout.LayoutParams(-1, dp(47)));
     LinearLayout tools = row();
-    undo = button("↶ 취소", false, () -> board.undo());
-    redo = button("↷ 복원", false, () -> board.redo());
+    undo = button("취소", false, () -> board.undo());
+    redo = button("복원", false, () -> board.redo());
     erase =
         button(
             "지우개",
@@ -252,9 +282,6 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
               board.moveMode = false;
               updateTools();
             });
-    addButton(tools, undo, 1);
-    addButton(tools, redo, 1);
-    addButton(tools, erase, 1);
     move =
         button(
             "이동",
@@ -267,53 +294,14 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
               board.moveMode = !board.moveMode;
               board.eraser = false;
               updateTools();
-              status.setText(board.moveMode ? "S펜으로 끌어서 글자 전체 이동" : "S펜으로 필기");
+              status.setText(board.moveMode ? "S펜으로 이동 · 크기 버튼으로 확대·축소" : "S펜으로 필기");
             });
-    addButton(tools, move, 1);
     addButton(tools, button("비우기", false, this::clearGlyph), 1);
+    addButton(tools, move, 1);
+    addButton(tools, erase, 1);
+    addButton(tools, undo, 1);
+    addButton(tools, redo, 1);
     root.addView(tools, new LinearLayout.LayoutParams(-1, dp(49)));
-    LinearLayout options = row();
-    penLabel = label("굵기 " + Math.round(project.penWidth), 12, muted);
-    options.addView(penLabel, new LinearLayout.LayoutParams(dp(60), dp(40)));
-    SeekBar width = new SeekBar(this);
-    width.setMax(48);
-    width.setProgress(Math.round(project.penWidth) - 6);
-    width.setProgressTintList(ColorStateList.valueOf(accent));
-    width.setThumbTintList(ColorStateList.valueOf(accent));
-    options.addView(width, new LinearLayout.LayoutParams(0, dp(40), 1));
-    width.setOnSeekBarChangeListener(
-        new SeekBar.OnSeekBarChangeListener() {
-          public void onProgressChanged(SeekBar s, int p, boolean user) {
-            if (board.penId >= 0) return;
-            board.width = project.penWidth = p + 6;
-            penLabel.setText("굵기 " + (p + 6));
-          }
-
-          public void onStartTrackingTouch(SeekBar s) {}
-
-          public void onStopTrackingTouch(SeekBar s) {
-            saveSettings();
-          }
-        });
-    ghost =
-        button(
-            "겹쳐 보기",
-            false,
-            () -> {
-              project.ghost = board.ghost = !board.ghost;
-              board.invalidate();
-              updateTools();
-              saveSettings();
-            });
-    options.addView(ghost, new LinearLayout.LayoutParams(dp(92), dp(37)));
-    options.addView(
-        button("비교", false, () -> pickGlyph(true)), new LinearLayout.LayoutParams(dp(55), dp(37)));
-    root.addView(options);
-    LinearLayout nav = row();
-    addButton(nav, button("이전", false, () -> move(-1)), 1);
-    addButton(nav, button("안 쓴 글자", false, this::nextEmpty), 2);
-    addButton(nav, button("다음 →", true, () -> move(1)), 2);
-    root.addView(nav, new LinearLayout.LayoutParams(-1, dp(51)));
     LinearLayout footer = row();
     progress = label("", 11, muted);
     status = label("", 11, muted);
@@ -351,8 +339,7 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
 
   void showGlyph() {
     board.setGlyph(project.get(code()));
-    target.setText(new String(Character.toChars(code())));
-    detail.setText(code() < 0x1100 ? "왼쪽 점선부터 쓰기 · S펜 전용" : "가운데에 맞춰 쓰기 · S펜 전용");
+
     updateReference();
     updateProgress();
     updateTools();
@@ -389,6 +376,7 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
   void updateTools() {
     undo.setEnabled(!board.undo.isEmpty());
     redo.setEnabled(!board.redo.isEmpty());
+    resize.setEnabled(board.moveMode && !board.glyph.strokes.isEmpty());
     move.setTextColor(board.moveMode ? Color.WHITE : accent);
     move.setBackground(shape(board.moveMode ? accent : Color.WHITE, 0));
     erase.setText(board.eraser ? "펜으로" : "지우개");
@@ -806,6 +794,100 @@ public final class MainActivity extends Activity implements InkBoard.Listener {
                 });
           }
         });
+  }
+
+  void placeNavigation(Button button, float x, float y) {
+    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) button.getLayoutParams();
+    int left = Math.max(0, Math.round(x)), top = Math.max(0, Math.round(y));
+    if (p.leftMargin != left || p.topMargin != top) {
+      p.leftMargin = left;
+      p.topMargin = top;
+      button.setLayoutParams(p);
+    }
+  }
+
+  void penOptions() {
+    LinearLayout panel = new LinearLayout(this);
+    panel.setOrientation(LinearLayout.VERTICAL);
+    panel.setPadding(dp(22), dp(12), dp(22), dp(12));
+    TextView value = label("굵기 " + Math.round(project.penWidth), 16, textColor);
+    panel.addView(value);
+    SeekBar slider = new SeekBar(this);
+    slider.setMax(48);
+    slider.setProgress(Math.round(project.penWidth) - 6);
+    panel.addView(slider, new LinearLayout.LayoutParams(-1, dp(48)));
+    slider.setOnSeekBarChangeListener(
+        new SeekBar.OnSeekBarChangeListener() {
+          public void onProgressChanged(SeekBar v, int p, boolean user) {
+            board.width = project.penWidth = p + 6;
+            value.setText("굵기 " + (p + 6));
+          }
+
+          public void onStartTrackingTouch(SeekBar v) {}
+
+          public void onStopTrackingTouch(SeekBar v) {}
+        });
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("펜 굵기")
+            .setView(panel)
+            .setPositiveButton("완료", null)
+            .create();
+    dialog.setOnDismissListener(d -> saveSettings());
+    dialog.show();
+  }
+
+  void resizeGlyph() {
+    if (!board.moveMode || board.glyph.strokes.isEmpty()) return;
+    FontProject.Glyph original = board.glyph.copy();
+    LinearLayout panel = new LinearLayout(this);
+    panel.setOrientation(LinearLayout.VERTICAL);
+    panel.setPadding(dp(22), dp(10), dp(22), dp(10));
+    TextView value = label("크기 100%", 16, textColor);
+    panel.addView(value);
+    SeekBar slider = new SeekBar(this);
+    slider.setMax(100);
+    slider.setProgress(50);
+    panel.addView(slider, new LinearLayout.LayoutParams(-1, dp(48)));
+    panel.addView(label("글자 중심을 기준으로 굵기도 함께 조절합니다.", 12, muted));
+    final float[] factor = {1};
+    final boolean[] applied = {false};
+    slider.setOnSeekBarChangeListener(
+        new SeekBar.OnSeekBarChangeListener() {
+          public void onProgressChanged(SeekBar v, int p, boolean user) {
+            factor[0] = board.previewScale(original, (p + 50) / 100f);
+            value.setText("크기 " + Math.round(factor[0] * 100) + "%");
+          }
+
+          public void onStartTrackingTouch(SeekBar v) {}
+
+          public void onStopTrackingTouch(SeekBar v) {}
+        });
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("글자 크기 조절")
+            .setView(panel)
+            .setNegativeButton("취소", null)
+            .setPositiveButton(
+                "적용",
+                (d, w) -> {
+                  applied[0] = true;
+                  if (Math.abs(factor[0] - 1) > .0001f) {
+                    board.undo.push(original);
+                    while (board.undo.size() > 40) board.undo.removeLast();
+                    board.redo.clear();
+                    board.notifyChanged();
+                  }
+                })
+            .create();
+    dialog.setOnDismissListener(
+        d -> {
+          if (!applied[0]) {
+            board.glyph = original;
+            board.invalidate();
+          }
+        });
+    dialog.show();
   }
 
   void guideOptions() {
